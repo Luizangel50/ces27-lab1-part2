@@ -8,9 +8,6 @@ import (
 // Schedules map operations on remote workers. This will run until InputFilePathChan
 // is closed. If there is no worker available, it'll block.
 func (master *Master) schedule(task *Task, proc string, filePathChan chan string) int {
-	//////////////////////////////////
-	// YOU WANT TO MODIFY THIS CODE //
-	//////////////////////////////////
 
 	var (
 		wg        sync.WaitGroup
@@ -19,6 +16,9 @@ func (master *Master) schedule(task *Task, proc string, filePathChan chan string
 		operation *Operation
 		counter   int
 	)
+
+	// Allocating the memory of an empty chan with RETRY_OPERATION_BUFFER length
+	master.failedOperationChan = make(chan *Operation, RETRY_OPERATION_BUFFER)
 
 	log.Printf("Scheduling %v operations\n", proc)
 
@@ -30,8 +30,30 @@ func (master *Master) schedule(task *Task, proc string, filePathChan chan string
 		worker = <-master.idleWorkerChan
 		wg.Add(1)
 		go master.runOperation(worker, operation, &wg)
+
 	}
 
+	wg.Wait()
+
+	// Close the chan because cannot accept more push/pop on the chan
+	close(master.failedOperationChan)
+
+	// Iterate over chan elements, without waiting for push/pop because
+	// the chan is already closed
+	for failedOperation := range master.failedOperationChan {
+
+		// Pick one idle worker
+		worker = <-master.idleWorkerChan
+
+		// Increment the counter of the WaitGroup
+		wg.Add(1)
+
+		// Run the failed operation by an idle worker
+		go master.runOperation(worker, failedOperation, &wg)
+	}	
+
+	// Barrier that waits all wg.Done() from each new goroutine
+	// created earlier
 	wg.Wait()
 
 	log.Printf("%vx %v operations completed\n", counter, proc)
@@ -56,10 +78,11 @@ func (master *Master) runOperation(remoteWorker *RemoteWorker, operation *Operat
 
 	if err != nil {
 		log.Printf("Operation %v '%v' Failed. Error: %v\n", operation.proc, operation.id, err)
-		wg.Done()
+		wg.Done()		
 		master.failedWorkerChan <- remoteWorker
+		master.failedOperationChan <- operation
 	} else {
-		wg.Done()
+		wg.Done()	
 		master.idleWorkerChan <- remoteWorker
 	}
 }

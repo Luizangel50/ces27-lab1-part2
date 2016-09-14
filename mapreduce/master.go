@@ -33,6 +33,9 @@ type Master struct {
 	// ADD EXTRA PROPERTIES HERE //
 	///////////////////////////////
 	// Fault Tolerance
+
+	// This chan is allocated only when a schedule is called
+	failedOperationChan chan *Operation
 }
 
 type Operation struct {
@@ -77,9 +80,20 @@ func (master *Master) acceptMultipleConnections() {
 
 // handleFailingWorkers will handle workers that fails during an operation.
 func (master *Master) handleFailingWorkers() {
-	/////////////////////////
-	// YOUR CODE GOES HERE //
-	/////////////////////////
+
+	// For each failed worker in channel
+	for failedWorker := range master.failedWorkerChan {
+
+		// Ensure exclusive access to master.workers map
+		master.workersMutex.Lock()
+	
+		// Printing error and removing fialed worker from 
+		log.Println("Removing worker", failedWorker.id, "from master list.")
+		delete(master.workers, failedWorker.id)
+		
+		// Leaving mutex
+		master.workersMutex.Unlock()
+	}
 }
 
 // Handle a single connection until it's done, then closes it.
